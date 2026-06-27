@@ -45,23 +45,14 @@ def retry_decorator(retries=3, min_delay=5, max_delay=10):
 os.environ.pop("DISPLAY", None)
 os.environ.pop("DYLD_LIBRARY_PATH", None)
 
-USERNAME = os.environ.get("LINUXDO_USERNAME")
-PASSWORD = os.environ.get("LINUXDO_PASSWORD")
 COOKIES = os.environ.get("LINUXDO_COOKIES", "").strip()  # 手动设置的 Cookie 字符串，优先使用
 BROWSE_ENABLED = os.environ.get("BROWSE_ENABLED", "true").strip().lower() not in [
     "false",
     "0",
     "off",
 ]
-if not USERNAME:
-    USERNAME = os.environ.get("USERNAME")
-if not PASSWORD:
-    PASSWORD = os.environ.get("PASSWORD")
 
 HOME_URL = "https://linux.do/"
-LOGIN_URL = "https://linux.do/login"
-SESSION_URL = "https://linux.do/session"
-CSRF_URL = "https://linux.do/session/csrf"
 
 
 class LinuxDoBrowser:
@@ -156,110 +147,6 @@ class LinuxDoBrowser:
             logger.info("Cookie 登录验证成功")
             return True
 
-    def login(self):
-        logger.info("开始账号密码登录")
-        # Step 1: Get CSRF Token
-        logger.info("获取 CSRF token...")
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Accept-Language": "zh-CN,zh;q=0.9",
-            "X-Requested-With": "XMLHttpRequest",
-            "Referer": LOGIN_URL,
-        }
-        resp_csrf = self.session.get(CSRF_URL, headers=headers, impersonate="firefox135")
-        csrf_token = None
-        if resp_csrf.status_code == 200:
-            try:
-                csrf_token = resp_csrf.json().get("csrf")
-            except: pass
-        if not csrf_token:
-            import html as _html
-            resp_home = self.session.get(HOME_URL, headers={"Accept":"text/html"}, impersonate="firefox135")
-            m = re.search(r'data-preloaded="([^"]*)"', resp_home.text)
-            if m:
-                pre = _html.unescape(m.group(1).replace('&quot;', '"'))
-                cm = re.search(r'"csrf":"([^"]+)"', pre)
-                if cm: csrf_token = cm.group(1)
-        if not csrf_token:
-            logger.error(f"获取 CSRF token 失败: {resp_csrf.status_code}")
-            return False
-        logger.info(f"CSRF Token obtained: {csrf_token[:10]}...")
-
-        # Step 2: Login
-        logger.info("正在登录...")
-        headers.update(
-            {
-                "X-CSRF-Token": csrf_token,
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "Origin": "https://linux.do",
-            }
-        )
-
-        data = {
-            "login": USERNAME,
-            "password": PASSWORD,
-            "second_factor_method": "1",
-            "timezone": "Asia/Shanghai",
-        }
-
-        try:
-            resp_login = self.session.post(
-                SESSION_URL, data=data, impersonate="firefox135", headers=headers
-            )
-
-            if resp_login.status_code == 200:
-                response_json = resp_login.json()
-                if response_json.get("error"):
-                    logger.error(f"登录失败: {response_json.get('error')}")
-                    return False
-                logger.info("登录成功!")
-            else:
-                logger.error(f"登录失败，状态码: {resp_login.status_code}")
-                logger.error(resp_login.text)
-                return False
-        except Exception as e:
-            logger.error(f"登录请求异常: {e}")
-            return False
-
-        # Step 3: Pass cookies to DrissionPage
-        logger.info("同步 Cookie 到 DrissionPage...")
-
-        cookies_dict = self.session.cookies.get_dict()
-
-        dp_cookies = []
-        for name, value in cookies_dict.items():
-            dp_cookies.append(
-                {
-                    "name": name,
-                    "value": value,
-                    "domain": ".linux.do",
-                    "path": "/",
-                }
-            )
-
-        self.page.set.cookies(dp_cookies)
-
-        logger.info("Cookie 设置完成，导航至 linux.do...")
-        self.page.get(HOME_URL)
-
-        time.sleep(5)
-        try:
-            user_ele = self.page.ele("@id=current-user")
-        except Exception as e:
-            logger.warning(f"登录验证失败: {str(e)}")
-            return True
-        if not user_ele:
-            # Fallback check for avatar
-            if "avatar" in self.page.html:
-                logger.info("登录验证成功 (通过 avatar)")
-                return True
-            logger.error("登录验证失败 (未找到 current-user)")
-            return False
-        else:
-            logger.info("登录验证成功")
-            return True
-
     def click_topic(self):
         topic_list = None
         for sel in ["@id=list-area", ".topic-list", "table.topic-list"]:
@@ -274,8 +161,9 @@ class LinuxDoBrowser:
         if not topic_list:
             logger.error("未找到主题帖")
             return False
-        logger.info(f"发现 {len(topic_list)} 个主题帖，随机选择10个")
-        for topic in random.sample(topic_list, 10):
+        browse_count = random.randint(6, 12)  # 随机浏览6-12个帖子
+        logger.info(f"发现 {len(topic_list)} 个主题帖，随机选择{browse_count}个")
+        for topic in random.sample(topic_list, browse_count):
             self.click_one_topic(topic.attr("href"))
         return True
 
@@ -283,7 +171,12 @@ class LinuxDoBrowser:
     def click_one_topic(self, topic_url):
         new_page = self.browser.new_tab()
         try:
-            new_page.get(topic_url)
+            # 使用 track_visit=true 标记已读(和真实浏览器一致)
+            if '?' in topic_url:
+                nav_url = topic_url + '&track_visit=true&forceLoad=true'
+            else:
+                nav_url = topic_url + '?track_visit=true&forceLoad=true'
+            new_page.get(nav_url)
             if random.random() < 0.3:  # 0.3 * 30 = 9
                 self.click_like(new_page)
             self.browse_post(new_page)
@@ -294,47 +187,63 @@ class LinuxDoBrowser:
                 pass
 
     def browse_post(self, page):
-        prev_url = None
-        # 开始自动滚动，最多滚动10次
-        for _ in range(10):
-            # 随机滚动一段距离
-            scroll_distance = random.randint(550, 650)  # 随机滚动 550-650 像素
-            logger.info(f"向下滚动 {scroll_distance} 像素...")
-            page.run_js(f"window.scrollBy(0, {scroll_distance})")
-            logger.info(f"已加载页面: {page.url}")
+        # 从URL中提取topic_id
+        import re as _re
+        m = _re.search(r'/t/[^/]+/(\d+)', page.url)
+        topic_id = int(m.group(1)) if m else None
+        prev_url = page.url
+        total_time = 0
+        post_num = 0
 
-            if random.random() < 0.03:  # 33 * 4 = 132
+        for _ in range(random.randint(5, 10)):
+            scroll_dist = random.randint(550, 650)
+            page.run_js(f"window.scrollBy(0, {scroll_dist})")
+
+            if random.random() < 0.03:
                 logger.success("随机退出浏览")
                 break
 
-            # 检查是否到达页面底部
             at_bottom = page.run_js(
                 "window.scrollY + window.innerHeight >= document.body.scrollHeight"
             )
-            current_url = page.url
-            if current_url != prev_url:
-                prev_url = current_url
-            elif at_bottom and prev_url == current_url:
-                logger.success("已到达页面底部，退出浏览")
-                break
 
-            # 动态随机等待
-            wait_time = random.uniform(2, 4)  # 随机等待 2-4 秒
-            logger.info(f"等待 {wait_time:.2f} 秒...")
-            time.sleep(wait_time)
+            post_num += 1
+            reading_time = random.randint(900, 1100)  # 每条帖子阅读~1秒
+            total_time += reading_time
+
+            # 发送阅读时长到 topics/timings (和真实浏览器行为一致)
+            if topic_id:
+                try:
+                    self.session.post(
+                        f"https://linux.do/topics/timings",
+                        data=f"timings%5B{post_num}%5D={reading_time}&topic_time={total_time}&topic_id={topic_id}",
+                        headers={"Content-Type": "application/x-www-form-urlencoded"},
+                        impersonate="firefox135",
+                        timeout=5,
+                    )
+                except Exception:
+                    pass
+
+            time.sleep(random.uniform(2, 4))
+
+            cur_url = page.url
+            if cur_url != prev_url:
+                prev_url = cur_url
+            elif at_bottom:
+                logger.success("已到底部，退出浏览")
+                break
 
     def run(self):
         try:
-            # 优先使用手动 Cookie 登录，没有再使用账号密码
+            # Cookie 登录
             if COOKIES:
                 login_res = self.login_with_cookies(COOKIES)
                 if not login_res:
-                    logger.warning("Cookie 登录失败，尝试账号密码登录...")
-                    login_res = self.login()
+                    logger.error("Cookie 登录失败")
+                    return
             else:
-                login_res = self.login()
-            if not login_res:  # 登录
-                logger.warning("登录验证失败")
+                logger.error("未设置 LINUXDO_COOKIES 环境变量")
+                return
 
             if BROWSE_ENABLED:
                 click_topic_res = self.click_topic()  # 点击主题
@@ -393,7 +302,7 @@ class LinuxDoBrowser:
 
     def send_notifications(self, browse_enabled):
         """发送签到通知"""
-        status_msg = f"✅每日登录成功: {USERNAME}"
+        status_msg = "✅每日登录成功"
         if browse_enabled:
             status_msg += " + 浏览任务完成"
         
@@ -402,8 +311,8 @@ class LinuxDoBrowser:
 
 
 if __name__ == "__main__":
-    if not COOKIES and (not USERNAME or not PASSWORD):
-        print("请设置 LINUXDO_COOKIES（Cookie 登录），或同时设置 USERNAME 和 PASSWORD（账号密码登录）")
+    if not COOKIES:
+        print("请设置 LINUXDO_COOKIES 环境变量")
         exit(1)
     browser = LinuxDoBrowser()
     browser.run()
