@@ -1,5 +1,5 @@
 """
-cron: 0 */12 * * *
+cron: 17 1,17 * * *
 new Env("老王签到")
 老王论坛签到 - 纯HTTP版（基于HAR分析）
 依赖: curl-cffi
