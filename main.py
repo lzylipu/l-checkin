@@ -310,100 +310,60 @@ class LinuxDoBrowser:
     def print_connect_info(self):
         logger.info("获取连接信息")
         try:
-            # 用当前已登录页面直接导航到connect(浏览器会自动带上子域cookie)
-            # 先确保cookie覆盖connect.linux.do子域
-            for ck in self.parse_cookie_string(COOKIES):
-                self.browser.set.cookies(ck, domain=ck.get("domain", ".linux.do"))
-
-            # 保存当前页面URL以便返回
-            current_url = self.page.url
-
-            # 直接导航(不用new_tab，new_tab可能不共享cookie)
-            self.page.get("https://connect.linux.do/")
-            time.sleep(5)
-
-            # 检查是否被重定向到login
-            page_url = self.page.url
-            if "login" in page_url:
-                logger.warning("connect页面被重定向到登录页，cookie未跨域生效")
-                # 尝试方案2: 用JS在浏览器内fetch connect页面
-                try:
-                    html = self.page.run_js("""
-                        return fetch('https://connect.linux.do/')
-                            .then(r => r.ok ? r.text() : '')
-                            .catch(() => '');
-                    """)
-                    if not html:
-                        # 返回原页面
-                        self.page.get(current_url)
-                        logger.warning("connect.linux.do fetch也失败，跳过connect信息")
-                        return
-                except Exception:
-                    self.page.get(current_url)
-                    logger.warning("connect.linux.do JS fetch异常，跳过connect信息")
-                    return
-            else:
-                html = self.page.html
-
-            # 返回原页面
-            if "login" not in page_url:
-                self.page.get(current_url)
-
-            # connect.linux.do是Discourse SPA，数据在preloaded JSON里
-            # HTML里不会有<table>，需要解析preloaded数据或等JS渲染
-            # 尝试从preloaded JSON提取connect info
             info = []
-            try:
-                preloaded_match = re.search(r'data-preloaded="([^"]*)"', html)
-                if preloaded_match:
-                    import html as html_mod
-                    decoded = html_mod.unescape(html_mod.unescape(preloaded_match.group(1)))
-                    preloaded = json.loads(decoded)
-                    # 查找connect相关数据
-                    for key in preloaded:
-                        if "connect" in key.lower() or "requirement" in key.lower():
-                            data = preloaded[key]
-                            if isinstance(data, str):
-                                data = json.loads(data)
-                            if isinstance(data, list):
-                                for item in data:
-                                    if isinstance(item, dict):
-                                        name = item.get("name", item.get("title", ""))
-                                        current_val = item.get("current", item.get("value", "0"))
-                                        req = item.get("requirement", item.get("required", "0"))
-                                        if name:
-                                            info.append([name, str(current_val), str(req)])
-                            elif isinstance(data, dict):
-                                for k, v in data.items():
-                                    if isinstance(v, list):
-                                        for item in v:
-                                            if isinstance(item, dict):
-                                                name = item.get("name", item.get("title", ""))
-                                                current_val = item.get("current", item.get("value", "0"))
-                                                req = item.get("requirement", item.get("required", "0"))
-                                                if name:
-                                                    info.append([name, str(current_val), str(req)])
-            except Exception as e:
-                logger.debug(f"解析preloaded数据失败: {e}")
 
-            # 如果preloaded没找到，尝试解析HTML表格(传统渲染方式)
-            if not info:
+            # 方案1: 在当前已登录页面用JS fetch connect子域(浏览器自动带cookie)
+            try:
+                html = self.page.run_js("""
+                    return fetch('https://connect.linux.do/')
+                        .then(r => r.ok ? r.text() : '')
+                        .catch(() => '');
+                """)
+            except Exception:
+                html = ""
+
+            if html and "login" not in html[:500].lower():
+                # 解析HTML表格
                 soup = BeautifulSoup(html, "html.parser")
                 rows = soup.select("table tr")
                 for row in rows:
                     cells = row.select("td")
                     if len(cells) >= 3:
                         project = cells[0].text.strip()
-                        current = cells[1].text.strip() if cells[1].text.strip() else "0"
-                        requirement = cells[2].text.strip() if cells[2].text.strip() else "0"
+                        current = cells[1].text.strip() or "0"
+                        requirement = cells[2].text.strip() or "0"
                         info.append([project, current, requirement])
 
-            # 如果还是没有，尝试用浏览器等JS渲染后再取
-            if not info and "login" not in page_url:
+                # 如果没有table，尝试preloaded JSON
+                if not info:
+                    try:
+                        import html as html_mod
+                        preloaded_match = re.search(r'data-preloaded="([^"]*)"', html)
+                        if preloaded_match:
+                            decoded = html_mod.unescape(html_mod.unescape(preloaded_match.group(1)))
+                            preloaded = json.loads(decoded)
+                            for key in preloaded:
+                                if "connect" in key.lower() or "requirement" in key.lower():
+                                    data = preloaded[key]
+                                    if isinstance(data, str):
+                                        data = json.loads(data)
+                                    if isinstance(data, list):
+                                        for item in data:
+                                            if isinstance(item, dict):
+                                                name = item.get("name", item.get("title", ""))
+                                                cur = item.get("current", item.get("value", "0"))
+                                                req = item.get("requirement", item.get("required", "0"))
+                                                if name:
+                                                    info.append([name, str(cur), str(req)])
+                    except Exception as e:
+                        logger.debug(f"解析preloaded失败: {e}")
+
+            # 方案2: 打开connect标签页等JS渲染
+            if not info:
+                logger.info("JS fetch未获取到connect表格，尝试新标签页渲染...")
                 try:
                     connect_tab = self.browser.new_tab("https://connect.linux.do/")
                     time.sleep(8)
-                    # 等表格渲染
                     connect_tab.wait.ele("table", timeout=10)
                     html2 = connect_tab.html
                     connect_tab.close()
@@ -413,8 +373,8 @@ class LinuxDoBrowser:
                         cells = row.select("td")
                         if len(cells) >= 3:
                             project = cells[0].text.strip()
-                            current = cells[1].text.strip() if cells[1].text.strip() else "0"
-                            requirement = cells[2].text.strip() if cells[2].text.strip() else "0"
+                            current = cells[1].text.strip() or "0"
+                            requirement = cells[2].text.strip() or "0"
                             info.append([project, current, requirement])
                 except Exception:
                     pass
