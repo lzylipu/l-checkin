@@ -207,21 +207,28 @@ class LinuxDoBrowser:
                 pass
 
     def browse_post(self, page):
-        # 从URL中提取topic_id
+        # 从URL中提取topic_id和标题
         import re as _re
         m = _re.search(r'/t/[^/]+/(\d+)', page.url)
         topic_id = int(m.group(1)) if m else None
+        # 提取帖子标题
+        try:
+            title = page.ele("tag:h1", timeout=2).text.strip()
+            if len(title) > 30:
+                title = title[:30] + "..."
+        except Exception:
+            title = f"帖子#{topic_id}" if topic_id else "未知帖子"
+
         prev_url = page.url
         total_time = 0
         post_num = 0
+        max_scrolls = random.randint(5, 10)
 
-        for _ in range(random.randint(5, 10)):
+        logger.info(f"📖 开始浏览: {title}")
+
+        for i in range(max_scrolls):
             scroll_dist = random.randint(550, 650)
             page.run_js(f"window.scrollBy(0, {scroll_dist})")
-
-            if random.random() < 0.03:
-                logger.success("随机退出浏览")
-                break
 
             at_bottom = page.run_js(
                 "window.scrollY + window.innerHeight >= document.body.scrollHeight"
@@ -230,6 +237,7 @@ class LinuxDoBrowser:
             post_num += 1
             reading_time = random.randint(900, 1100)  # 每条帖子阅读~1秒
             total_time += reading_time
+            logger.info(f"  📜 滚动 {i+1}/{max_scrolls} | 楼层{post_num} | 阅读{(reading_time/1000):.1f}s")
 
             # 发送阅读时长到 topics/timings (和真实浏览器行为一致)
             if topic_id:
@@ -250,8 +258,10 @@ class LinuxDoBrowser:
             if cur_url != prev_url:
                 prev_url = cur_url
             elif at_bottom:
-                logger.success("已到底部，退出浏览")
+                logger.info(f"  ✅ 已到底部，浏览了{post_num}个楼层")
                 break
+        else:
+            logger.info(f"  ✅ 浏览完成，共{post_num}个楼层，总时长{(total_time/1000):.0f}s")
 
     def run(self):
         try:
