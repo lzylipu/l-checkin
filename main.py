@@ -1,5 +1,5 @@
 """
-cron: 5 */6 * * *
+cron: 5 */5 * * *
 new Env("L站 签到")
 """
 
@@ -131,7 +131,7 @@ class LinuxDoBrowser:
         self.page.set.cookies(dp_cookies)
         logger.info("Cookie 设置完成，导航至 linux.do...")
         self.page.get(HOME_URL)
-        time.sleep(5)
+        time.sleep(random.uniform(3, 7))
 
         # 验证登录状态
         try:
@@ -168,7 +168,7 @@ class LinuxDoBrowser:
         scroll_attempts = 0
         while len(topic_list) < TOPIC_LIMIT and scroll_attempts < 5:
             self.page.scroll.to_bottom()
-            time.sleep(2)
+            time.sleep(random.uniform(1.5, 3.5))
             for sel in ["@id=list-area", ".topic-list", "table.topic-list"]:
                 try:
                     area = self.page.ele(sel, timeout=3)
@@ -189,6 +189,8 @@ class LinuxDoBrowser:
 
     @retry_decorator()
     def click_one_topic(self, topic_url):
+        # 反检测: 帖子间随机停顿 1~8秒
+        time.sleep(random.uniform(1, 8))
         new_page = self.browser.new_tab()
         try:
             # 使用 track_visit=true 标记已读(和真实浏览器一致)
@@ -206,12 +208,40 @@ class LinuxDoBrowser:
             except Exception:
                 pass
 
+    @staticmethod
+    def _human_scroll_js(base_px=150, jitter=300):
+        """生成模拟人类滑动的JS: 基础距离 + 正负随机偏移, 分多步smooth完成
+        
+        参数参考用户经验: 
+        - 基础150px + 正负300px抖动 → 实际0~450px随机
+        - 分3~6个微步完成, 每步间隔35~150ms
+        - 使用requestAnimationFrame模拟真实触摸/滚轮
+        """
+        total_dist = max(10, base_px + random.randint(-jitter, jitter))
+        steps = random.randint(3, 6)
+        step_dist = total_dist // steps
+        remainder = total_dist % steps
+        # 生成每步距离(略有随机)
+        parts = []
+        for s in range(steps):
+            d = step_dist + (1 if s < remainder else 0)
+            d = max(1, d + random.randint(-3, 3))  # 微小抖动
+            parts.append(d)
+        # 生成每步间隔(ms)
+        intervals = [random.randint(35, 150) for _ in range(steps - 1)]
+        js = f"(() => {{ const parts = {parts}; const intervals = {intervals}; let y = 0; let i = 0; function step() {{ if (i >= parts.length) return; y += parts[i]; window.scrollBy({{top: parts[i], behavior: 'instant'}}); i++; if (i < parts.length) setTimeout(step, intervals[i-1]); }} step(); }})()"
+        return js, total_dist
+
+    @staticmethod
+    def _human_delay(min_s=0.2, max_s=1.2):
+        """人类阅读停顿: 200~1200ms随机, 替代固定sleep"""
+        return random.uniform(min_s, max_s)
+
     def browse_post(self, page):
-        # 从URL中提取topic_id和标题
+        """模拟人类浏览: 随机滑动距离+分步平滑+随机间隔+随机阅读时间"""
         import re as _re
         m = _re.search(r'/t/[^/]+/(\d+)', page.url)
         topic_id = int(m.group(1)) if m else None
-        # 提取帖子标题
         try:
             title = page.ele("tag:h1", timeout=2).text.strip()
             if len(title) > 30:
@@ -222,24 +252,35 @@ class LinuxDoBrowser:
         prev_url = page.url
         total_time = 0
         post_num = 0
-        max_scrolls = random.randint(5, 10)
+        max_scrolls = random.randint(5, 8)
 
         logger.info(f"📖 开始浏览: {title}")
 
         for i in range(max_scrolls):
-            scroll_dist = random.randint(550, 650)
-            page.run_js(f"window.scrollBy(0, {scroll_dist})")
+            # 反检测滑动: 基础150px ± 300px抖动 = 0~450px, smooth分步
+            scroll_js, scroll_dist = self._human_scroll_js(base_px=150, jitter=300)
+            page.run_js(scroll_js)
+
+            # 等滑动动画完成
+            time.sleep(random.uniform(0.15, 0.4))
 
             at_bottom = page.run_js(
                 "window.scrollY + window.innerHeight >= document.body.scrollHeight"
             )
 
             post_num += 1
-            reading_time = random.randint(900, 1100)  # 每条帖子阅读~1秒
+            # 阅读时间: 200~1200ms随机(人类真实停顿), 偶尔深度阅读(2~4秒)
+            if random.random() < 0.15:
+                reading_time = random.randint(2000, 4000)  # 15%概率深度阅读
+            else:
+                reading_time = random.randint(200, 1200)  # 正常浏览
             total_time += reading_time
-            logger.info(f"  📜 滚动 {i+1}/{max_scrolls} | 楼层{post_num} | 阅读{(reading_time/1000):.1f}s")
+            
+            # 浏览进度: 每隔2~3次输出一次, 减少日志规律性
+            if i == 0 or random.random() < 0.4:
+                logger.info(f"  📜 滚动{i+1}/{max_scrolls} | +{scroll_dist}px | 阅读{reading_time}ms")
 
-            # 发送阅读时长到 topics/timings (和真实浏览器行为一致)
+            # 发送阅读时长到 topics/timings
             if topic_id:
                 try:
                     self.session.post(
@@ -252,7 +293,8 @@ class LinuxDoBrowser:
                 except Exception:
                     pass
 
-            time.sleep(random.uniform(2, 4))
+            # 反检测间隔: 200~1200ms随机, 替代固定2~4秒
+            time.sleep(self._human_delay(0.2, 1.2))
 
             cur_url = page.url
             if cur_url != prev_url:
@@ -261,9 +303,13 @@ class LinuxDoBrowser:
                 logger.info(f"  ✅ 已到底部，浏览了{post_num}个楼层")
                 break
         else:
-            logger.info(f"  ✅ 浏览完成，共{post_num}个楼层，总时长{(total_time/1000):.0f}s")
+            logger.info(f"  ✅ 浏览完成，{post_num}层，总{total_time/1000:.0f}s")
 
     def run(self):
+        # 反检测: 启动随机延迟0~300秒, 避免固定时间点执行
+        start_delay = random.uniform(0, 300)
+        logger.info(f"⏱ 随机启动延迟: {start_delay:.0f}s ({start_delay/60:.1f}min)")
+        time.sleep(start_delay)
         try:
             # Cookie 登录
             if COOKIES:
@@ -301,7 +347,7 @@ class LinuxDoBrowser:
                 logger.info("找到未点赞的帖子，准备点赞")
                 like_button.click()
                 logger.info("点赞成功")
-                time.sleep(random.uniform(1, 2))
+                time.sleep(random.uniform(0.5, 2.5))
             else:
                 logger.info("帖子可能已经点过赞了")
         except Exception as e:
