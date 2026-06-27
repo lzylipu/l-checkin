@@ -163,6 +163,24 @@ class LinuxDoBrowser:
         if not topic_list:
             logger.error("未找到主题帖")
             return False
+
+        # 滚动加载更多帖子直到达到TOPIC_LIMIT
+        scroll_attempts = 0
+        while len(topic_list) < TOPIC_LIMIT and scroll_attempts < 5:
+            self.page.scroll.to_bottom()
+            time.sleep(2)
+            for sel in ["@id=list-area", ".topic-list", "table.topic-list"]:
+                try:
+                    area = self.page.ele(sel, timeout=3)
+                    if area:
+                        new_list = area.eles(".:title")
+                        if len(new_list) > len(topic_list):
+                            topic_list = new_list
+                            break
+                except Exception:
+                    continue
+            scroll_attempts += 1
+
         browse_count = min(BROWSE_COUNT, len(topic_list))
         logger.info(f"发现 {len(topic_list)} 个主题帖，随机选择{browse_count}个")
         for topic in random.sample(topic_list, browse_count):
@@ -282,65 +300,85 @@ class LinuxDoBrowser:
     def print_connect_info(self):
         logger.info("获取连接信息")
         try:
-            # 方案1: DrissionPage浏览器导航到connect页面(浏览器有完整登录态)
-            connect_tab = self.browser.new_tab("https://connect.linux.do/")
+            # 用当前已登录页面直接导航到connect(浏览器会自动带上子域cookie)
+            # 先确保cookie覆盖connect.linux.do子域
+            for ck in self.parse_cookie_string(COOKIES):
+                self.browser.set.cookies(ck, domain=ck.get("domain", ".linux.do"))
+
+            # 保存当前页面URL以便返回
+            current_url = self.page.url
+
+            # 直接导航(不用new_tab，new_tab可能不共享cookie)
+            self.page.get("https://connect.linux.do/")
             time.sleep(5)
 
-            # 检查是否被重定向到登录页
-            current_url = connect_tab.url
-            if "login" in current_url:
-                logger.warning("connect页面被重定向到登录页，尝试从浏览器同步cookie")
-                connect_tab.close()
-                # 方案2: 从浏览器取出cookie，手动拼header给curl_cffi
-                dp_cookies = self.browser.cookies()
-                cookie_str = "; ".join(
-                    f"{c.get('name','')}={c.get('value','')}"
-                    for c in dp_cookies
-                    if c.get('name') and c.get('value')
-                )
-                resp = self.session.get(
-                    "https://connect.linux.do/",
-                    headers={
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                        "Cookie": cookie_str,
-                    },
-                    impersonate="firefox135",
-                )
-                html = resp.text
+            # 检查是否被重定向到login
+            page_url = self.page.url
+            if "login" in page_url:
+                logger.warning("connect页面被重定向到登录页，cookie未跨域生效")
+                # 尝试方案2: 用JS在浏览器内fetch connect页面
+                try:
+                    html = self.page.run_js("""
+                        return fetch('https://connect.linux.do/')
+                            .then(r => r.ok ? r.text() : '')
+                            .catch(() => '');
+                    """)
+                    if not html:
+                        # 返回原页面
+                        self.page.get(current_url)
+                        logger.warning("connect.linux.do fetch也失败，跳过connect信息")
+                        return
+                except Exception:
+                    self.page.get(current_url)
+                    logger.warning("connect.linux.do JS fetch异常，跳过connect信息")
+                    return
             else:
-                html = connect_tab.html
-                connect_tab.close()
+                html = self.page.html
 
-            soup = BeautifulSoup(html, "html.parser")
-            rows = soup.select("table tr")
+            # 返回原页面
+            if "login" not in page_url:
+                self.page.get(current_url)
+
+            # connect.linux.do是Discourse SPA，数据在preloaded JSON里
+            # HTML里不会有<table>，需要解析preloaded数据或等JS渲染
+            # 尝试从preloaded JSON提取connect info
             info = []
+            try:
+                preloaded_match = re.search(r'data-preloaded="([^"]*)"', html)
+                if preloaded_match:
+                    import html as html_mod
+                    decoded = html_mod.unescape(html_mod.unescape(preloaded_match.group(1)))
+                    preloaded = json.loads(decoded)
+                    # 查找connect相关数据
+                    for key in preloaded:
+                        if "connect" in key.lower() or "requirement" in key.lower():
+                            data = preloaded[key]
+                            if isinstance(data, str):
+                                data = json.loads(data)
+                            if isinstance(data, list):
+                                for item in data:
+                                    if isinstance(item, dict):
+                                        name = item.get("name", item.get("title", ""))
+                                        current_val = item.get("current", item.get("value", "0"))
+                                        req = item.get("requirement", item.get("required", "0"))
+                                        if name:
+                                            info.append([name, str(current_val), str(req)])
+                            elif isinstance(data, dict):
+                                for k, v in data.items():
+                                    if isinstance(v, list):
+                                        for item in v:
+                                            if isinstance(item, dict):
+                                                name = item.get("name", item.get("title", ""))
+                                                current_val = item.get("current", item.get("value", "0"))
+                                                req = item.get("requirement", item.get("required", "0"))
+                                                if name:
+                                                    info.append([name, str(current_val), str(req)])
+            except Exception as e:
+                logger.debug(f"解析preloaded数据失败: {e}")
 
-            for row in rows:
-                cells = row.select("td")
-                if len(cells) >= 3:
-                    project = cells[0].text.strip()
-                    current = cells[1].text.strip() if cells[1].text.strip() else "0"
-                    requirement = cells[2].text.strip() if cells[2].text.strip() else "0"
-                    info.append([project, current, requirement])
-
+            # 如果preloaded没找到，尝试解析HTML表格(传统渲染方式)
             if not info:
-                logger.warning("未获取到connect信息，可能需要浏览器渲染")
-                # 方案3: 尝试从浏览器cookie拼header请求(同方案2的备用)
-                dp_cookies = self.browser.cookies()
-                cookie_str = "; ".join(
-                    f"{c.get('name','')}={c.get('value','')}"
-                    for c in dp_cookies
-                    if c.get('name') and c.get('value')
-                )
-                resp = self.session.get(
-                    "https://connect.linux.do/",
-                    headers={
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                        "Cookie": cookie_str,
-                    },
-                    impersonate="firefox135",
-                )
-                soup = BeautifulSoup(resp.text, "html.parser")
+                soup = BeautifulSoup(html, "html.parser")
                 rows = soup.select("table tr")
                 for row in rows:
                     cells = row.select("td")
@@ -349,6 +387,27 @@ class LinuxDoBrowser:
                         current = cells[1].text.strip() if cells[1].text.strip() else "0"
                         requirement = cells[2].text.strip() if cells[2].text.strip() else "0"
                         info.append([project, current, requirement])
+
+            # 如果还是没有，尝试用浏览器等JS渲染后再取
+            if not info and "login" not in page_url:
+                try:
+                    connect_tab = self.browser.new_tab("https://connect.linux.do/")
+                    time.sleep(8)
+                    # 等表格渲染
+                    connect_tab.wait.ele("table", timeout=10)
+                    html2 = connect_tab.html
+                    connect_tab.close()
+                    soup = BeautifulSoup(html2, "html.parser")
+                    rows = soup.select("table tr")
+                    for row in rows:
+                        cells = row.select("td")
+                        if len(cells) >= 3:
+                            project = cells[0].text.strip()
+                            current = cells[1].text.strip() if cells[1].text.strip() else "0"
+                            requirement = cells[2].text.strip() if cells[2].text.strip() else "0"
+                            info.append([project, current, requirement])
+                except Exception:
+                    pass
 
             logger.info("--------------Connect Info-----------------")
             if info:
