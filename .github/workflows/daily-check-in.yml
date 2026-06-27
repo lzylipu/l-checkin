@@ -2,8 +2,7 @@ name: Daily Check-in
 
 on:
   schedule:
-    #- cron: '0 1 * * *'  # 每天1点 UTC 时间执行
-    - cron: '0 */12 * * *'  # 每12小时执行一次
+    - cron: '5 */5 * * *'  # 每5小时
 
   workflow_dispatch:
 
@@ -28,10 +27,11 @@ jobs:
 
       - name: Execute script
         env:
-          USERNAME: ${{ secrets.USERNAME }}
-          PASSWORD: ${{ secrets.PASSWORD }}
-          L_SITE_USERNAME: ${{ secrets.L_SITE_USERNAME }}
-          L_SITE_PASSWORD: ${{ secrets.L_SITE_PASSWORD }}
+          LINUXDO_COOKIES: ${{ secrets.LINUXDO_COOKIES }}
+          LAOWANG_COOKIE: ${{ secrets.LAOWANG_COOKIE }}
+          BROWSE_ENABLED: ${{ secrets.BROWSE_ENABLED }}
+          TOPIC_LIMIT: ${{ secrets.TOPIC_LIMIT }}
+          BROWSE_COUNT: ${{ secrets.BROWSE_COUNT }}
           GOTIFY_URL: ${{ secrets.GOTIFY_URL }}
           GOTIFY_TOKEN: ${{ secrets.GOTIFY_TOKEN }}
           SC3_PUSH_KEY: ${{ secrets.SC3_PUSH_KEY }}
@@ -39,8 +39,6 @@ jobs:
           WXPUSH_TOKEN: ${{ secrets.WXPUSH_TOKEN }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          L_SITE_COOKIES: ${{ secrets.L_SITE_COOKIES }}
-          BROWSE_ENABLED: ${{ secrets.BROWSE_ENABLED }}
         run: |
           python main.py
 
@@ -51,3 +49,4 @@ jobs:
           repository: ${{ github.repository }}
           retain_days: 10
           keep_minimum_runs: 6
+
