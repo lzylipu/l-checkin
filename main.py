@@ -308,82 +308,91 @@ class LinuxDoBrowser:
             logger.error(f"点赞失败: {str(e)}")
 
     def print_connect_info(self):
-        logger.info("获取连接信息")
+        """通过 Discourse API 获取用户统计信息(等价于 connect.linux.do)"""
+        logger.info("📊 获取用户统计信息")
         try:
             info = []
 
-            # 方案1: 在当前已登录页面用JS fetch connect子域(浏览器自动带cookie)
+            # 方案1: 用curl_cffi session直接调Discourse API(已有.linux.do cookie)
             try:
-                html = self.page.run_js("""
-                    return fetch('https://connect.linux.do/')
-                        .then(r => r.ok ? r.text() : '')
-                        .catch(() => '');
-                """)
-            except Exception:
-                html = ""
+                r = self.session.get(
+                    "https://linux.do/session/current.json",
+                    impersonate="firefox135",
+                    timeout=10,
+                )
+                if r.ok:
+                    data = r.json()
+                    username = data.get("current_user", {}).get("username", "")
+                    trust_level = data.get("current_user", {}).get("trust_level", 0)
+                    if username:
+                        info.append(["Trust Level", str(trust_level), "2"])
 
-            if html and "login" not in html[:500].lower():
-                # 解析HTML表格
-                soup = BeautifulSoup(html, "html.parser")
-                rows = soup.select("table tr")
-                for row in rows:
-                    cells = row.select("td")
-                    if len(cells) >= 3:
-                        project = cells[0].text.strip()
-                        current = cells[1].text.strip() or "0"
-                        requirement = cells[2].text.strip() or "0"
-                        info.append([project, current, requirement])
+                        r2 = self.session.get(
+                            f"https://linux.do/u/{username}/summary.json",
+                            impersonate="firefox135",
+                            timeout=10,
+                        )
+                        if r2.ok:
+                            summary = r2.json()
+                            us = summary.get("user", {})
+                            stats = us.get("user_stats", {})
 
-                # 如果没有table，尝试preloaded JSON
-                if not info:
-                    try:
-                        import html as html_mod
-                        preloaded_match = re.search(r'data-preloaded="([^"]*)"', html)
-                        if preloaded_match:
-                            decoded = html_mod.unescape(html_mod.unescape(preloaded_match.group(1)))
-                            preloaded = json.loads(decoded)
-                            for key in preloaded:
-                                if "connect" in key.lower() or "requirement" in key.lower():
-                                    data = preloaded[key]
-                                    if isinstance(data, str):
-                                        data = json.loads(data)
-                                    if isinstance(data, list):
-                                        for item in data:
-                                            if isinstance(item, dict):
-                                                name = item.get("name", item.get("title", ""))
-                                                cur = item.get("current", item.get("value", "0"))
-                                                req = item.get("requirement", item.get("required", "0"))
-                                                if name:
-                                                    info.append([name, str(cur), str(req)])
-                    except Exception as e:
-                        logger.debug(f"解析preloaded失败: {e}")
+                            days = us.get("days_visited", 0) or stats.get("days_visited", 0)
+                            topics = stats.get("topics_entered", 0) or stats.get("topic_count", 0)
+                            posts = stats.get("posts_read_count", 0) or stats.get("posts_read", 0)
+                            time_s = stats.get("time_read", 0)
+                            time_h = round(time_s / 3600, 1) if time_s else 0
 
-            # 方案2: 打开connect标签页等JS渲染
+                            info.append(["Days Visited", str(days), "50"])
+                            info.append(["Topics Read", str(topics), "20"])
+                            info.append(["Posts Read", str(posts), "10"])
+                            info.append(["Time Read", f"{time_h}h", "1h"])
+                    else:
+                        logger.warning("API未返回用户名")
+                else:
+                    logger.debug(f"session/current.json 请求失败: {r.status_code}")
+            except Exception as e:
+                logger.debug(f"API方式获取失败: {e}")
+
+            # 方案2: 从浏览器当前页面用JS调API(备选)
             if not info:
-                logger.info("JS fetch未获取到connect表格，尝试新标签页渲染...")
                 try:
-                    connect_tab = self.browser.new_tab("https://connect.linux.do/")
-                    time.sleep(8)
-                    connect_tab.wait.ele("table", timeout=10)
-                    html2 = connect_tab.html
-                    connect_tab.close()
-                    soup = BeautifulSoup(html2, "html.parser")
-                    rows = soup.select("table tr")
-                    for row in rows:
-                        cells = row.select("td")
-                        if len(cells) >= 3:
-                            project = cells[0].text.strip()
-                            current = cells[1].text.strip() or "0"
-                            requirement = cells[2].text.strip() or "0"
-                            info.append([project, current, requirement])
-                except Exception:
-                    pass
+                    result = self.page.run_js("""
+                        return fetch('/session/current.json')
+                            .then(r => r.ok ? r.json() : null)
+                            .catch(() => null);
+                    """)
+                    if result and result.get("current_user"):
+                        cu = result["current_user"]
+                        username = cu.get("username", "")
+                        trust_level = cu.get("trust_level", 0)
+                        info.append(["Trust Level", str(trust_level), "2"])
+
+                        result2 = self.page.run_js("""
+                            return fetch('/u/USERNAME_PLACEHOLDER/summary.json')
+                                .then(r => r.ok ? r.json() : null)
+                                .catch(() => null);
+                        """.replace("USERNAME_PLACEHOLDER", username))
+                        if result2:
+                            us = result2.get("user", {})
+                            stats = us.get("user_stats", {})
+                            days = us.get("days_visited", 0) or stats.get("days_visited", 0)
+                            topics = stats.get("topics_entered", 0) or stats.get("topic_count", 0)
+                            posts = stats.get("posts_read_count", 0) or stats.get("posts_read", 0)
+                            time_s = stats.get("time_read", 0)
+                            time_h = round(time_s / 3600, 1) if time_s else 0
+                            info.append(["Days Visited", str(days), "50"])
+                            info.append(["Topics Read", str(topics), "20"])
+                            info.append(["Posts Read", str(posts), "10"])
+                            info.append(["Time Read", f"{time_h}h", "1h"])
+                except Exception as e:
+                    logger.debug(f"浏览器JS方式获取失败: {e}")
 
             logger.info("--------------Connect Info-----------------")
             if info:
                 logger.info("\n" + tabulate(info, headers=["项目", "当前", "要求"], tablefmt="pretty"))
             else:
-                logger.warning("Connect信息为空，connect.linux.do可能需要JS渲染或cookie未生效")
+                logger.warning("Connect信息获取失败，API可能不可用")
         except Exception as e:
             logger.error(f"获取连接信息失败: {str(e)}")
 
