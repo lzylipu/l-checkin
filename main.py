@@ -209,33 +209,38 @@ class LinuxDoBrowser:
                 pass
 
     @staticmethod
-    def _human_scroll_js(base_px=150, jitter=300):
-        """生成模拟人类滑动的JS: 基础距离 + 正负随机偏移, 分多步smooth完成
+    def _human_scroll_js(min_px=300, max_px=600):
+        """模拟人类滑动: 300~600px(一屏的1/3~2/3), 分2~4步smooth完成
         
-        参数参考用户经验: 
-        - 基础150px + 正负300px抖动 → 实际0~450px随机
-        - 分3~6个微步完成, 每步间隔35~150ms
-        - 使用requestAnimationFrame模拟真实触摸/滚轮
+        真实行为: 一次滑动看到新内容停下阅读, 不是碎步猛划
+        - 距离: 300~600px随机(覆盖一屏的1/3到2/3)
+        - 分步: 2~4步, 每步间隔60~120ms, 模拟手指/滚轮的连续动作
+        - 偶尔小幅回调(-30~0px), 模拟滑过一点往回拉
         """
-        total_dist = max(10, base_px + random.randint(-jitter, jitter))
-        steps = random.randint(3, 6)
+        total_dist = random.randint(min_px, max_px)
+        # 10%概率小幅回调(滑过了往回拉一点)
+        if random.random() < 0.1:
+            total_dist -= random.randint(20, 50)
+            total_dist = max(total_dist, 80)
+        steps = random.randint(2, 4)
         step_dist = total_dist // steps
         remainder = total_dist % steps
-        # 生成每步距离(略有随机)
         parts = []
         for s in range(steps):
             d = step_dist + (1 if s < remainder else 0)
-            d = max(1, d + random.randint(-3, 3))  # 微小抖动
+            d = max(5, d + random.randint(-8, 8))  # 每步略有差异
             parts.append(d)
-        # 生成每步间隔(ms)
-        intervals = [random.randint(35, 150) for _ in range(steps - 1)]
-        js = f"(() => {{ const parts = {parts}; const intervals = {intervals}; let y = 0; let i = 0; function step() {{ if (i >= parts.length) return; y += parts[i]; window.scrollBy({{top: parts[i], behavior: 'instant'}}); i++; if (i < parts.length) setTimeout(step, intervals[i-1]); }} step(); }})()"
+        # 步间间隔60~120ms(手指连续动作的节奏)
+        intervals = [random.randint(60, 120) for _ in range(steps - 1)]
+        js = f"(() => {{ const parts = {parts}; const intervals = {intervals}; let i = 0; function step() {{ if (i >= parts.length) return; window.scrollBy({{top: parts[i], behavior: 'instant'}}); i++; if (i < parts.length) setTimeout(step, intervals[i-1]); }} step(); }})()"
         return js, total_dist
 
     @staticmethod
-    def _human_delay(min_s=0.2, max_s=1.2):
-        """人类阅读停顿: 200~1200ms随机, 替代固定sleep"""
-        return random.uniform(min_s, max_s)
+    def _human_delay():
+        """人类阅读停顿: 大部分1.5~4秒扫读, 10%认真读5~8秒"""
+        if random.random() < 0.10:
+            return random.uniform(5, 8)  # 认真看一段
+        return random.uniform(1.5, 4)  # 正常扫读
 
     def browse_post(self, page):
         """模拟人类浏览: 随机滑动距离+分步平滑+随机间隔+随机阅读时间"""
@@ -257,28 +262,25 @@ class LinuxDoBrowser:
         logger.info(f"📖 开始浏览: {title}")
 
         for i in range(max_scrolls):
-            # 反检测滑动: 基础150px ± 300px抖动 = 0~450px, smooth分步
-            scroll_js, scroll_dist = self._human_scroll_js(base_px=150, jitter=300)
+            # 模拟人类滑动: 300~600px(一屏1/3~2/3), 分2~4步smooth
+            scroll_js, scroll_dist = self._human_scroll_js()
             page.run_js(scroll_js)
 
-            # 等滑动动画完成
-            time.sleep(random.uniform(0.15, 0.4))
+            # 滑动动画完成
+            time.sleep(random.uniform(0.2, 0.5))
 
             at_bottom = page.run_js(
                 "window.scrollY + window.innerHeight >= document.body.scrollHeight"
             )
 
             post_num += 1
-            # 阅读时间: 200~1200ms随机(人类真实停顿), 偶尔深度阅读(2~4秒)
-            if random.random() < 0.15:
-                reading_time = random.randint(2000, 4000)  # 15%概率深度阅读
-            else:
-                reading_time = random.randint(200, 1200)  # 正常浏览
+            # 阅读时间: 模拟真实阅读, 上报值和实际停顿一致
+            reading_time = random.randint(1500, 4000)  # 1.5~4秒, 正常扫读
+            if random.random() < 0.10:
+                reading_time = random.randint(5000, 8000)  # 10%认真看5~8秒
             total_time += reading_time
             
-            # 浏览进度: 每隔2~3次输出一次, 减少日志规律性
-            if i == 0 or random.random() < 0.4:
-                logger.info(f"  📜 滚动{i+1}/{max_scrolls} | +{scroll_dist}px | 阅读{reading_time}ms")
+            logger.info(f"  📜 滚动{i+1}/{max_scrolls} | +{scroll_dist}px | 阅读{reading_time}ms")
 
             # 发送阅读时长到 topics/timings
             if topic_id:
@@ -293,8 +295,8 @@ class LinuxDoBrowser:
                 except Exception:
                     pass
 
-            # 反检测间隔: 200~1200ms随机, 替代固定2~4秒
-            time.sleep(self._human_delay(0.2, 1.2))
+            # 阅读停顿: 时间和上报的reading_time一致, 让行为和数据吻合
+            time.sleep(self._human_delay())
 
             cur_url = page.url
             if cur_url != prev_url:
