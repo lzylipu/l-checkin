@@ -279,13 +279,35 @@ class LinuxDoBrowser:
 
     def print_connect_info(self):
         logger.info("获取连接信息")
-        # Use browser (DrissionPage) which has login session
-        # curl_cffi session can't access connect.linux.do (sub-domain cookie issue)
         try:
+            # 方案1: DrissionPage浏览器导航到connect页面(浏览器有完整登录态)
             connect_tab = self.browser.new_tab("https://connect.linux.do/")
-            time.sleep(3)
-            html = connect_tab.html
-            connect_tab.close()
+            time.sleep(5)
+
+            # 检查是否被重定向到登录页
+            current_url = connect_tab.url
+            if "login" in current_url:
+                logger.warning("connect页面被重定向到登录页，尝试从浏览器同步cookie")
+                connect_tab.close()
+                # 方案2: 从浏览器取出cookie，手动拼header给curl_cffi
+                dp_cookies = self.browser.cookies()
+                cookie_str = "; ".join(
+                    f"{c.get('name','')}={c.get('value','')}"
+                    for c in dp_cookies
+                    if c.get('name') and c.get('value')
+                )
+                resp = self.session.get(
+                    "https://connect.linux.do/",
+                    headers={
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Cookie": cookie_str,
+                    },
+                    impersonate="firefox135",
+                )
+                html = resp.text
+            else:
+                html = connect_tab.html
+                connect_tab.close()
 
             soup = BeautifulSoup(html, "html.parser")
             rows = soup.select("table tr")
@@ -300,13 +322,19 @@ class LinuxDoBrowser:
                     info.append([project, current, requirement])
 
             if not info:
-                # Fallback: try curl_cffi with explicit cookie forwarding
-                cookie_header = "; ".join(f"{c.name}={c.value}" for c in self.session.cookies)
+                logger.warning("未获取到connect信息，可能需要浏览器渲染")
+                # 方案3: 尝试从浏览器cookie拼header请求(同方案2的备用)
+                dp_cookies = self.browser.cookies()
+                cookie_str = "; ".join(
+                    f"{c.get('name','')}={c.get('value','')}"
+                    for c in dp_cookies
+                    if c.get('name') and c.get('value')
+                )
                 resp = self.session.get(
                     "https://connect.linux.do/",
                     headers={
                         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                        "Cookie": cookie_header,
+                        "Cookie": cookie_str,
                     },
                     impersonate="firefox135",
                 )
@@ -321,7 +349,10 @@ class LinuxDoBrowser:
                         info.append([project, current, requirement])
 
             logger.info("--------------Connect Info-----------------")
-            logger.info("\n" + tabulate(info, headers=["项目", "当前", "要求"], tablefmt="pretty"))
+            if info:
+                logger.info("\n" + tabulate(info, headers=["项目", "当前", "要求"], tablefmt="pretty"))
+            else:
+                logger.warning("Connect信息为空，connect.linux.do可能需要JS渲染或cookie未生效")
         except Exception as e:
             logger.error(f"获取连接信息失败: {str(e)}")
 
