@@ -1,6 +1,6 @@
 # 🐧 L站签到
 
-> 自动登录 L站(linux.do)，随机浏览帖子 + 点赞，实现每日签到与活跃度提升
+> 自动登录 L站，随机浏览帖子 + 点赞，实现每日签到与活跃度提升
 
 [**English**](#english) | [**中文**](#中文)
 
@@ -75,7 +75,9 @@ requirements.txt     # 📦 Python 依赖
 
 ---
 
-## English {#english}
+<a id="english"></a>
+
+## English
 
 ### ✨ Features
 
