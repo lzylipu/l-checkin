@@ -311,90 +311,163 @@ class LinuxDoBrowser:
         """通过 Discourse API 获取用户统计信息(等价于 connect.linux.do)"""
         logger.info("📊 获取用户统计信息")
         try:
+            # 升级要求配置 (来自Discourse官方 + 油猴脚本验证)
+            LEVEL_REQUIREMENTS = {
+                0: {  # TL0 → TL1
+                    "topics_entered": {"req": 5, "label": "浏览话题"},
+                    "posts_read_count": {"req": 30, "label": "已读帖子"},
+                    "time_read": {"req": 600, "label": "阅读时长"},  # 秒, 10分钟
+                },
+                1: {  # TL1 → TL2
+                    "days_visited": {"req": 15, "label": "访问天数"},
+                    "likes_given": {"req": 1, "label": "给出点赞"},
+                    "likes_received": {"req": 1, "label": "收到点赞"},
+                    "post_count": {"req": 3, "label": "发帖数"},
+                    "topics_entered": {"req": 20, "label": "浏览话题"},
+                    "posts_read_count": {"req": 100, "label": "已读帖子"},
+                    "time_read": {"req": 3600, "label": "阅读时长"},  # 秒, 60分钟
+                },
+            }
+
+            data = self._fetch_user_data()
+            if not data:
+                logger.warning("📊 未能获取用户数据")
+                return
+
+            username = data.get("username", "未知")
+            trust_level = data.get("trust_level", 0)
+            summary = data.get("user_summary", {})
+
             info = []
 
-            # 方案1: 用curl_cffi session直接调Discourse API(已有.linux.do cookie)
-            try:
-                r = self.session.get(
-                    "https://linux.do/session/current.json",
-                    impersonate="firefox135",
-                    timeout=10,
-                )
-                if r.ok:
-                    data = r.json()
-                    username = data.get("current_user", {}).get("username", "")
-                    trust_level = data.get("current_user", {}).get("trust_level", 0)
-                    if username:
-                        info.append(["Trust Level", str(trust_level), "2"])
+            # 信任等级
+            level_names = {0: "新用户", 1: "基本用户", 2: "成员", 3: "活跃用户", 4: "领导者"}
+            level_name = level_names.get(trust_level, f"TL{trust_level}")
+            info.append(["🪪 信任等级", f"{trust_level} ({level_name})", "—"])
 
-                        r2 = self.session.get(
-                            f"https://linux.do/u/{username}/summary.json",
-                            impersonate="firefox135",
-                            timeout=10,
-                        )
-                        if r2.ok:
-                            summary = r2.json()
-                            us = summary.get("user", {})
-                            stats = us.get("user_stats", {})
+            # 通用统计 (所有等级都显示)
+            days = summary.get("days_visited", 0)
+            topics = summary.get("topics_entered", 0)
+            posts_read = summary.get("posts_read_count", 0)
+            time_s = summary.get("time_read", 0)
+            likes_given = summary.get("likes_given", 0)
+            likes_received = summary.get("likes_received", 0)
+            post_count = summary.get("post_count", 0)
 
-                            days = us.get("days_visited", 0) or stats.get("days_visited", 0)
-                            topics = stats.get("topics_entered", 0) or stats.get("topic_count", 0)
-                            posts = stats.get("posts_read_count", 0) or stats.get("posts_read", 0)
-                            time_s = stats.get("time_read", 0)
-                            time_h = round(time_s / 3600, 1) if time_s else 0
+            # 下一级要求
+            reqs = LEVEL_REQUIREMENTS.get(trust_level, {})
+            next_level = trust_level + 1
+            next_name = level_names.get(next_level, f"TL{next_level}")
 
-                            info.append(["Days Visited", str(days), "50"])
-                            info.append(["Topics Read", str(topics), "20"])
-                            info.append(["Posts Read", str(posts), "10"])
-                            info.append(["Time Read", f"{time_h}h", "1h"])
+            def format_time(seconds):
+                if seconds >= 3600:
+                    return f"{seconds/3600:.1f}h"
+                return f"{seconds/60:.0f}min"
+
+            # 显示各项指标和升级要求
+            def add_stat(label, current, key):
+                req_cfg = reqs.get(key, {})
+                req_val = req_cfg.get("req", None)
+                req_label = req_cfg.get("label", key)
+                if req_val is not None:
+                    # 特殊处理时间
+                    if key == "time_read":
+                        display_cur = format_time(current)
+                        display_req = format_time(req_val)
+                        met = "✅" if current >= req_val else "❌"
+                        info.append([f"  {req_label}", f"{display_cur} / {display_req}", met])
                     else:
-                        logger.warning("API未返回用户名")
+                        met = "✅" if current >= req_val else "❌"
+                        info.append([f"  {req_label}", f"{current} / {req_val}", met])
                 else:
-                    logger.debug(f"session/current.json 请求失败: {r.status_code}")
-            except Exception as e:
-                logger.debug(f"API方式获取失败: {e}")
+                    # 超出已知要求范围的指标，仅展示当前值
+                    if key == "time_read":
+                        info.append([f"  {label}", format_time(current), "—"])
+                    else:
+                        info.append([f"  {label}", str(current), "—"])
 
-            # 方案2: 从浏览器当前页面用JS调API(备选)
-            if not info:
-                try:
-                    result = self.page.run_js("""
-                        return fetch('/session/current.json')
-                            .then(r => r.ok ? r.json() : null)
-                            .catch(() => null);
-                    """)
-                    if result and result.get("current_user"):
-                        cu = result["current_user"]
-                        username = cu.get("username", "")
-                        trust_level = cu.get("trust_level", 0)
-                        info.append(["Trust Level", str(trust_level), "2"])
+            if reqs:
+                info.append([f"📈 {next_name}要求", "当前 / 要求", "达标"])
 
-                        result2 = self.page.run_js("""
-                            return fetch('/u/USERNAME_PLACEHOLDER/summary.json')
-                                .then(r => r.ok ? r.json() : null)
-                                .catch(() => null);
-                        """.replace("USERNAME_PLACEHOLDER", username))
-                        if result2:
-                            us = result2.get("user", {})
-                            stats = us.get("user_stats", {})
-                            days = us.get("days_visited", 0) or stats.get("days_visited", 0)
-                            topics = stats.get("topics_entered", 0) or stats.get("topic_count", 0)
-                            posts = stats.get("posts_read_count", 0) or stats.get("posts_read", 0)
-                            time_s = stats.get("time_read", 0)
-                            time_h = round(time_s / 3600, 1) if time_s else 0
-                            info.append(["Days Visited", str(days), "50"])
-                            info.append(["Topics Read", str(topics), "20"])
-                            info.append(["Posts Read", str(posts), "10"])
-                            info.append(["Time Read", f"{time_h}h", "1h"])
-                except Exception as e:
-                    logger.debug(f"浏览器JS方式获取失败: {e}")
+            add_stat("访问天数", days, "days_visited")
+            add_stat("浏览话题", topics, "topics_entered")
+            add_stat("已读帖子", posts_read, "posts_read_count")
+            add_stat("阅读时长", time_s, "time_read")
+            add_stat("给出点赞", likes_given, "likes_given")
+            add_stat("收到点赞", likes_received, "likes_received")
+            add_stat("发帖数", post_count, "post_count")
 
             logger.info("--------------Connect Info-----------------")
             if info:
-                logger.info("\n" + tabulate(info, headers=["项目", "当前", "要求"], tablefmt="pretty"))
+                logger.info("\n" + tabulate(info, headers=["项目", "当前/要求", "状态"], tablefmt="pretty"))
             else:
-                logger.warning("Connect信息获取失败，API可能不可用")
+                logger.warning("📊 未能获取统计信息")
         except Exception as e:
             logger.error(f"获取连接信息失败: {str(e)}")
+
+    def _fetch_user_data(self):
+        """双通道获取用户数据: HTTP API → 浏览器JS fetch"""
+        # 通道1: curl_cffi session 直接调 API (已有 .linux.do cookie)
+        try:
+            r = self.session.get(
+                "https://linux.do/session/current.json",
+                impersonate="firefox135",
+                timeout=10,
+            )
+            if r.ok:
+                data = r.json()
+                cu = data.get("current_user", {})
+                username = cu.get("username", "")
+                trust_level = cu.get("trust_level", 0)
+                if username:
+                    # 获取 summary
+                    r2 = self.session.get(
+                        f"https://linux.do/u/{username}/summary.json",
+                        impersonate="firefox135",
+                        timeout=10,
+                    )
+                    if r2.ok:
+                        sdata = r2.json()
+                        result = {
+                            "username": username,
+                            "trust_level": trust_level,
+                            "user_summary": sdata.get("user_summary", {}),
+                        }
+                        # trust_level 可能也在 summary 中
+                        if not trust_level and "user_summary" in sdata:
+                            result["trust_level"] = sdata["user_summary"].get("trust_level", 0)
+                        logger.debug(f"API获取用户数据成功: {username} TL{trust_level}")
+                        return result
+        except Exception as e:
+            logger.debug(f"HTTP API获取失败: {e}")
+
+        # 通道2: 浏览器内JS fetch (同源请求不触发CF)
+        try:
+            result_js = self.page.run_js("""
+                return fetch('/session/current.json')
+                    .then(r => r.ok ? r.json() : null)
+                    .catch(() => null);
+            """)
+            if result_js and result_js.get("current_user"):
+                cu = result_js["current_user"]
+                username = cu.get("username", "")
+                trust_level = cu.get("trust_level", 0)
+                if username:
+                    summary_js = self.page.run_js("""
+                        return fetch('/u/""" + username + """/summary.json')
+                            .then(r => r.ok ? r.json() : null)
+                            .catch(() => null);
+                    """)
+                    if summary_js:
+                        return {
+                            "username": username,
+                            "trust_level": trust_level,
+                            "user_summary": summary_js.get("user_summary", {}),
+                        }
+        except Exception as e:
+            logger.debug(f"浏览器JS获取失败: {e}")
+
+        return None
 
     def send_notifications(self, browse_enabled):
         """发送签到通知"""
