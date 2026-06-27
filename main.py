@@ -51,6 +51,8 @@ BROWSE_ENABLED = os.environ.get("BROWSE_ENABLED", "true").strip().lower() not in
     "0",
     "off",
 ]
+TOPIC_LIMIT = int(os.environ.get("TOPIC_LIMIT", "50"))  # 发现帖子数上限
+BROWSE_COUNT = int(os.environ.get("BROWSE_COUNT", "20"))  # 浏览帖子数量
 
 HOME_URL = "https://linux.do/"
 
@@ -161,7 +163,7 @@ class LinuxDoBrowser:
         if not topic_list:
             logger.error("未找到主题帖")
             return False
-        browse_count = random.randint(6, 12)  # 随机浏览6-12个帖子
+        browse_count = min(BROWSE_COUNT, len(topic_list))
         logger.info(f"发现 {len(topic_list)} 个主题帖，随机选择{browse_count}个")
         for topic in random.sample(topic_list, browse_count):
             self.click_one_topic(topic.attr("href"))
