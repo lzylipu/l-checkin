@@ -123,7 +123,7 @@ class LinuxDoBrowser:
 
         # 同步到 requests.Session，以便后续 API 请求（如 print_connect_info）使用
         for ck in dp_cookies:
-            self.session.cookies.set(ck["name"], ck["value"], domain="linux.do")
+            self.session.cookies.set(ck["name"], ck["value"], domain=".linux.do")
 
         # 同步到 DrissionPage
         self.page.set.cookies(dp_cookies)
