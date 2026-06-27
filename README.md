@@ -2,10 +2,11 @@
 
 > 自动登录 L站，随机浏览帖子 + 点赞，实现每日签到与活跃度提升
 
-[**English**](#english) | [**中文**](#中文)
+[**English**](#user-content-english) | [**中文**](#user-content-chinese)
 
 ---
 
+<a id="chinese"></a>
 ## 中文
 
 ### ✨ 功能
@@ -76,7 +77,6 @@ requirements.txt     # 📦 Python 依赖
 ---
 
 <a id="english"></a>
-
 ## English
 
 ### ✨ Features
