@@ -1,4 +1,4 @@
-# 🐧 L站签到 / LinuxDo Daily Check-in
+# 🐧 L站签到
 
 > 自动登录 L站(linux.do)，随机浏览帖子 + 点赞，实现每日签到与活跃度提升
 
@@ -83,7 +83,7 @@ requirements.txt     # 📦 Python 依赖
 - 📖 Browse topics with scroll reading & timing reports (`/topics/timings`)
 - ❤️ Auto like posts
 - 🔄 Scroll to load more topics (up to 50 candidates, browse 20)
-- 🌐 Fetch connect info (trust levels, etc.)
+- 🌐 Fetch Connect info (trust levels, etc.)
 - 👴 Laowang forum check-in
 - 📬 Multi-channel notifications (Telegram / Gotify / ServerChan³ / wxpush)
 - ⏰ GitHub Actions & Qinglong panel support
@@ -92,7 +92,7 @@ requirements.txt     # 📦 Python 依赖
 
 | Variable | Description | Required | Default |
 |----------|-------------|:--------:|---------|
-| `LINUXDO_COOKIES` | LinuxDo browser Cookie string | ✅ | — |
+| `LINUXDO_COOKIES` | L Site browser Cookie string | ✅ | — |
 | `LAOWANG_COOKIE` | Laowang forum Cookie | ❌ | — |
 | `TOPIC_LIMIT` | Max topics to discover (scroll loading) | ❌ | `50` |
 | `BROWSE_COUNT` | Number of topics to browse per run | ❌ | `20` |
@@ -122,7 +122,7 @@ requirements.txt     # 📦 Python 依赖
 
 | Task | Cron Expression | Description |
 |------|----------------|-------------|
-| 🐧 LinuxDo Check-in | `5 */5 * * *` | Every 5 hours at :05 |
+| 🐧 L Site Check-in | `5 */5 * * *` | Every 5 hours at :05 |
 | 👴 Laowang Check-in | `17 1,17 * * *` | Daily 1:17 & 17:17 |
 
 > 🐳 Docker Qinglong must use `whyour/qinglong:debian` image
@@ -130,7 +130,7 @@ requirements.txt     # 📦 Python 依赖
 ### 📁 File Structure
 
 ```
-main.py              # 🐧 LinuxDo check-in main script
+main.py              # 🐧 L Site check-in main script
 laowang_checkin.py   # 👴 Laowang forum check-in
 notify.py            # 📬 Notification module
 requirements.txt     # 📦 Python dependencies
