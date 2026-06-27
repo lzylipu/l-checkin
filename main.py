@@ -279,26 +279,51 @@ class LinuxDoBrowser:
 
     def print_connect_info(self):
         logger.info("获取连接信息")
-        headers = {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-        }
-        resp = self.session.get(
-            "https://connect.linux.do/", headers=headers, impersonate="firefox135"
-        )
-        soup = BeautifulSoup(resp.text, "html.parser")
-        rows = soup.select("table tr")
-        info = []
+        # Use browser (DrissionPage) which has login session
+        # curl_cffi session can't access connect.linux.do (sub-domain cookie issue)
+        try:
+            connect_tab = self.browser.new_tab("https://connect.linux.do/")
+            time.sleep(3)
+            html = connect_tab.html
+            connect_tab.close()
 
-        for row in rows:
-            cells = row.select("td")
-            if len(cells) >= 3:
-                project = cells[0].text.strip()
-                current = cells[1].text.strip() if cells[1].text.strip() else "0"
-                requirement = cells[2].text.strip() if cells[2].text.strip() else "0"
-                info.append([project, current, requirement])
+            soup = BeautifulSoup(html, "html.parser")
+            rows = soup.select("table tr")
+            info = []
 
-        logger.info("--------------Connect Info-----------------")
-        logger.info("\n" + tabulate(info, headers=["项目", "当前", "要求"], tablefmt="pretty"))
+            for row in rows:
+                cells = row.select("td")
+                if len(cells) >= 3:
+                    project = cells[0].text.strip()
+                    current = cells[1].text.strip() if cells[1].text.strip() else "0"
+                    requirement = cells[2].text.strip() if cells[2].text.strip() else "0"
+                    info.append([project, current, requirement])
+
+            if not info:
+                # Fallback: try curl_cffi with explicit cookie forwarding
+                cookie_header = "; ".join(f"{c.name}={c.value}" for c in self.session.cookies)
+                resp = self.session.get(
+                    "https://connect.linux.do/",
+                    headers={
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Cookie": cookie_header,
+                    },
+                    impersonate="firefox135",
+                )
+                soup = BeautifulSoup(resp.text, "html.parser")
+                rows = soup.select("table tr")
+                for row in rows:
+                    cells = row.select("td")
+                    if len(cells) >= 3:
+                        project = cells[0].text.strip()
+                        current = cells[1].text.strip() if cells[1].text.strip() else "0"
+                        requirement = cells[2].text.strip() if cells[2].text.strip() else "0"
+                        info.append([project, current, requirement])
+
+            logger.info("--------------Connect Info-----------------")
+            logger.info("\n" + tabulate(info, headers=["项目", "当前", "要求"], tablefmt="pretty"))
+        except Exception as e:
+            logger.error(f"获取连接信息失败: {str(e)}")
 
     def send_notifications(self, browse_enabled):
         """发送签到通知"""
