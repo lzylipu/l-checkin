@@ -28,7 +28,6 @@ jobs:
       - name: Execute script
         env:
           LINUXDO_COOKIES: ${{ secrets.LINUXDO_COOKIES }}
-          LAOWANG_COOKIE: ${{ secrets.LAOWANG_COOKIE }}
           BROWSE_ENABLED: ${{ secrets.BROWSE_ENABLED }}
           TOPIC_LIMIT: ${{ secrets.TOPIC_LIMIT }}
           BROWSE_COUNT: ${{ secrets.BROWSE_COUNT }}
