@@ -135,3 +135,11 @@ requirements.txt     # 📦 Python dependencies
 
 - **GitHub Actions**: `sync.yml` auto syncs upstream daily
 - **Qinglong Panel**: Pull by repo schedule rules
+
+
+---
+
+<a id="license"></a>
+## 📄 许可证 / License
+
+MIT License. See [LICENSE](./LICENSE).
