@@ -2,7 +2,7 @@
 
 **🔐 Cookie 登录 · 📖 随机浏览 · ❤️ 自动点赞 · 📬 多渠道通知 · ⏰ 全自动定时**
 
-[**English**](#user-content-english) | [**中文**](#user-content-chinese)
+**[English](./README_EN.md) | [中文](#user-content-chinese)**
 
 ---
 
