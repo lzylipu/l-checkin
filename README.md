@@ -1,4 +1,18 @@
-# 🐧 L站签到
+<div align="center">
+
+# 🐧 L站签到 / L Site Check-in
+
+**🔐 Cookie 登录 · 📖 随机浏览 · ❤️ 自动点赞 · 📬 多渠道通知 · ⏰ 全自动定时**
+
+[![Check-in](https://img.shields.io/github/actions/workflow/status/lzylipu/l-checkin/daily-check-in.yml?style=flat-square&label=check-in)](../../actions)
+[![License](https://img.shields.io/github/license/lzylipu/l-checkin?style=flat-square)](./LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+
+[**English**](#user-content-english) | [**中文**](#user-content-chinese)
+
+</div>
+
+---
 
 > 自动登录 L站，随机浏览帖子 + 点赞，实现每日签到与活跃度提升
 
