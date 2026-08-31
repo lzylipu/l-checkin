@@ -1,16 +1,8 @@
-<div align="center">
-
 # 🐧 L-Checkin — L Site Auto Check-in
 
 **🔐 Cookie Login · 📖 Topic Browsing · ❤️ Auto Like · 📬 Multi-channel Notify · ⏰ Fully Automated**
 
-[![GitHub Actions](https://img.shields.io/github/actions/workflow/status/lzylipu/l-checkin/daily-check-in.yml?style=flat-square&label=check-in)](../../actions)
-[![License](https://img.shields.io/github/license/lzylipu/l-checkin?style=flat-square)](./LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-
 **English | [简体中文](./README.md)**
-
-</div>
 
 ---
 
